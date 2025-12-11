@@ -20,6 +20,7 @@ hr{
 }
 .header{
     background-color: rgb(153, 231, 245);
+    color: rgb(51, 49, 49);
     position: fixed;
     text-align: center;
     left: 0px;
