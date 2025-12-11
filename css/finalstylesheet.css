@@ -1,0 +1,110 @@
+body{
+    background-color: white;
+    background-image: url("../assets/img/background.jpg");
+    background-size: cover;
+    background-position: center;
+    background-repeat: repeat-y;
+    margin: 0;
+    font-family: Georgia, 'Times New Roman', Times, serif;
+}
+hr{
+    border: none;
+    height: 3px;
+    background-color: black;
+    width: 80%;
+    margin: 30px auto;
+}
+.common{
+    border: 2px solid white;
+    position: static;
+}
+.header{
+    background-color: rgb(153, 231, 245);
+    position: fixed;
+    text-align: center;
+    left: 0px;
+    right: 0px;
+    top: 0px;
+    height: 130px;
+    z-index: 1;
+    font-size: x-large;
+    padding-left: 25px;
+    box-shadow: 0 5px 15px rgba(0,0,0,0.15);
+    
+}
+.main2{
+    margin-top: 0px;
+    margin-bottom: 60px;
+    background-color: white;
+    top: 220px;
+    left: 0px;
+    right: 0px;
+    bottom: auto;
+    text-align: center;
+    font-size: xx-large;
+}
+.footer{
+    position: fixed;
+    text-align: center;
+    font-style: italic;
+    font-size: medium;
+    left: 0px;
+    right: 0px;
+    bottom: 0px;
+    height: 60px;
+    background-color: lightcyan;
+}
+img{
+    width: 30%;
+    display: block;
+    margin-left: auto;
+    margin-right: auto;
+}
+.social-icons {
+    display: flex;
+    gap: 20px;
+    justify-content: center;
+    margin: 40px 0;
+}
+.social-circle {
+    width: 50px;
+    height: 50px;
+    background-color: black;
+    border-radius: 50%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    transition: transform 0.2s ease;
+}
+.social-circle:hover {
+    transform: scale(1.1);
+}
+.social-circle img {
+    width: 60%;
+    height: 60%;
+    filter: invert(1);
+}
+.big-icon {
+    width: 70% !important;
+    height: 60% !important;
+}
+.info-box {
+    min-width: 600px;
+    background-color: lightcyan;
+    border-radius: 15px;
+    padding: 20px;
+    max-width: 600px;
+    margin: auto;
+    margin-left: auto;
+    margin-right: auto;
+    text-align: center;
+    box-shadow: 0 5px 15px rgba(0,0,0,0.15);
+}
+.page-wrapper {
+    max-width: 900px;
+    margin: 180px auto 80px auto;
+    background: white;
+    padding: 40px;
+    border-radius: 15px;
+    box-shadow: 0 8px 25px rgba(0,0,0,0.2);
+}

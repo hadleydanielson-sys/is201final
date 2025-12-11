@@ -1,0 +1,830 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fish Frenzy</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Tone.js for sound effects -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <!-- Load Firebase Modules -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        // Imports for Firestore functions (now defined globally below)
+        import { getFirestore, doc, getDoc, setDoc, onSnapshot, collection, query, limit, orderBy } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // IMPORTANT: Global Variables from Canvas Environment
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+        // FIX: Corrected typo to use __initial_auth_token instead of initialAuthToken
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        if (firebaseConfig) {
+            setLogLevel('Debug');
+            const app = initializeApp(firebaseConfig);
+            window.db = getFirestore(app);
+            window.auth = getAuth(app);
+            
+            // Explicitly expose required Firestore functions globally 
+            window.query = query;
+            window.collection = collection;
+            window.orderBy = orderBy;
+            window.limit = limit;
+            window.onSnapshot = onSnapshot;
+            window.doc = doc;
+            window.getDoc = getDoc;
+            window.setDoc = setDoc;
+
+            window.userId = null;
+            window.isAuthReady = false;
+            window.HIGHSCORE_COLLECTION_PATH = `artifacts/${appId}/public/data/fishing_highscores`;
+
+            // Authentication Setup
+            onAuthStateChanged(window.auth, async (user) => {
+                if (user) {
+                    window.userId = user.uid;
+                } else {
+                    // Sign in anonymously if initial token is not available
+                    await signInAnonymously(window.auth);
+                }
+                window.isAuthReady = true;
+                console.log("Firebase Auth Ready. User ID:", window.userId);
+                // After auth is ready, load scores
+                window.loadHighScores();
+                if (window.userId) {
+                     document.getElementById('user-id-display').textContent = `Player ID: ${window.userId.substring(0, 8)}...`;
+                }
+            });
+
+            // Attempt to sign in with custom token if available
+            if (initialAuthToken) {
+                signInWithCustomToken(window.auth, initialAuthToken).catch(error => {
+                    console.error("Custom Token Sign-in Failed. Falling back to anonymous.", error);
+                });
+            }
+        } else {
+            console.error("Firebase Config not found. High score saving disabled.");
+            window.isAuthReady = true; // Still allow game to run without persistence
+            document.getElementById('user-id-display').textContent = `CATCH YOUR FISH!`;
+        }
+    </script>
+    <style>
+        /* --- PIXEL ART STYLING (Top-Down View) --- */
+        
+        /* Custom utility for the header shadow */
+        .text-shadow-lg {
+            text-shadow: 0 4px 8px rgba(0, 0, 0, 0.7);
+        }
+
+        /* Water Effect - Now the whole background */
+        .ocean-surface {
+            background: linear-gradient(to bottom right, #3498db 0%, #2980b9 100%);
+            animation: ripple-motion 30s infinite linear;
+        }
+        @keyframes ripple-motion {
+            0% { background-position: 0% 0%; }
+            100% { background-position: 100% 100%; }
+        }
+
+        /* Top-Down Pixel Boat - LONGER CANOE SHAPE */
+        .pixel-boat {
+            width: 250px; /* Even Longer */
+            height: 80px;
+            background: #996633; /* Wood color */
+            border: 4px solid #000;
+            box-shadow: 6px 6px 0 0 #000; /* Pixel shadow */
+            border-radius: 50%; /* Oval shape for simple top-down boat */
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
+        }
+        .pixel-boat-trim {
+            width: 80%;
+            height: 50%;
+            background: #663300; /* Darker interior/trim */
+            border-radius: 50%;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 11;
+        }
+
+        /* Pixel Rod (Now at the top of the boat, pointing forward) */
+        #rod {
+            /* Positioned relative to the boat */
+            position: absolute;
+            bottom: 60px; /* Moved up towards the front of the boat (top edge) */
+            left: 50%;
+            /* Pivot point is the handle/reel end */
+            transform-origin: 50% 100%; 
+            /* Initial resting position: Rotated slightly backward (downward) and centered */
+            transform: rotate(-5deg) translateX(-50%); 
+            /* Rod is static now, only transitions for the fish bite effect */
+            transition: transform 0.1s ease-out; 
+            z-index: 15;
+            pointer-events: none;
+            width: 120px; /* Overall rod length for positioning */
+            height: 120px; /* Needed for vertical rotation */
+        }
+        .pixel-rod-handle {
+            width: 10px;
+            height: 20px;
+            background: #6b4326; /* Cork/handle */
+            box-shadow: 2px 2px 0 0 #000;
+            position: absolute;
+            bottom: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            border-radius: 2px;
+        }
+        .pixel-reel {
+            width: 15px;
+            height: 5px;
+            background: #e0e0e0; /* Light gray reel */
+            box-shadow: 1px 1px 0 0 #000;
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%) rotate(90deg); /* Rotate reel visual */
+            border-radius: 1px;
+        }
+        .pixel-rod-body {
+            width: 3px;
+            height: 70px; /* Length of the rod section */
+            background: #a9a9a9; /* Gray metal */
+            box-shadow: 1px 1px 0 0 #000;
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            border-radius: 1px 1px 0 0;
+        }
+
+        /* Rod tip anchor position (exactly at the visual tip of the rod body) */
+        #rod-tip-anchor {
+            position: absolute; 
+            top: 20px; /* Aligns precisely with the end of .pixel-rod-body */
+            left: 50%;
+            transform: translateX(-50%);
+            width: 1px; 
+            height: 1px;
+        }
+
+        /* Line and Lure */
+        #fishing-line {
+            position: absolute;
+            width: 2px;
+            background: #f0f0f0; /* White line */
+            transform-origin: 0 0; /* Important for rotation */
+            transition: none; /* KEY FIX: No CSS transition during JS animation loop */
+            z-index: 16;
+            pointer-events: none;
+        }
+        .pixel-bobber {
+            width: 12px;
+            height: 12px;
+            background: #ff4d4d; /* Bright red */
+            border: 2px solid #000;
+            box-shadow: 2px 2px 0 0 #000, -1px -1px 0 0 #fff;
+            border-radius: 50%; /* Round bobber */
+            transition: none; /* KEY FIX: No CSS transition during JS animation loop */
+            z-index: 17;
+            pointer-events: none;
+            opacity: 0;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 flex items-center justify-center min-h-screen p-2 font-mono text-white overflow-hidden flex-col">
+
+    <!-- NEW HEADER SECTION -->
+    <header class="mb-4 text-center p-4">
+        <h1 class="text-5xl md:text-6xl font-extrabold text-yellow-400 mb-2 uppercase tracking-widest text-shadow-lg">
+            Fish Frenzy
+        </h1>
+        <h3 class="text-lg md:text-xl font-medium text-gray-300">
+            Test your fishing skills here!
+        </h3>
+    </header>
+    <!-- END NEW HEADER SECTION -->
+
+    <!-- Game Container -->
+    <div id="game-container" class="w-full max-w-sm md:max-w-md aspect-[9/16] md:aspect-[3/4] rounded-2xl shadow-2xl flex flex-col relative overflow-hidden bg-gray-800">
+        
+        <!-- UI: Scoreboard -->
+        <div class="absolute top-0 left-0 right-0 z-30 flex justify-between p-4 bg-gray-900/70 backdrop-blur-sm rounded-t-2xl">
+            <div class="text-xs font-bold md:text-sm">SCORE: <span id="current-score" class="text-yellow-400">0</span></div>
+            <div class="text-xs font-bold md:text-sm">TIME: <span id="game-timer" class="text-red-400">45</span>s</div> <!-- ADDED TIMER DISPLAY -->
+            <div class="text-xs font-bold md:text-sm">HIGH SCORE: <span id="high-score" class="text-green-400">0</span></div>
+        </div>
+
+        <!-- Ocean Scene (Top-Down) -->
+        <div id="scene" class="flex-grow relative ocean-surface">
+            <!-- Ocean Surface (Water) -->
+            <div class="absolute inset-0 ocean-surface"></div>
+
+            <!-- Boat (Foreground, Top-Down) -->
+            <div class="pixel-boat">
+                <div class="pixel-boat-trim"></div>
+            </div>
+
+            <!-- Fishing Rod (Top-Down, forward position) -->
+            <div id="rod">
+                <div class="pixel-rod-handle"></div>
+                <div class="pixel-reel"></div>
+                <div class="pixel-rod-body"></div>
+                <!-- This div marks the rod tip position -->
+                <div id="rod-tip-anchor"></div>
+            </div>
+
+            <!-- Line/Lure -->
+            <div id="fishing-line" class="absolute w-px bg-gray-300 pointer-events-none"></div>
+            <div id="lure" class="absolute pixel-bobber pointer-events-none"></div>
+            
+            <!-- Fish Catch Visual -->
+            <div id="fish-catch-visual" class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-6xl opacity-0 transition-all duration-500 ease-in-out z-20"></div>
+        </div>
+
+        <!-- Game Message Area -->
+        <div class="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 z-40 w-3/4 p-4 rounded-lg bg-black/70 backdrop-blur-sm text-center">
+            <div id="game-message" class="text-xl font-extrabold text-white uppercase">Press SPACE or TAP to Cast</div>
+            <div id="instruction-message" class="text-sm text-gray-400 mt-2"></div>
+        </div>
+        
+        <!-- Footer for Player ID -->
+        <div class="absolute bottom-0 left-0 right-0 p-1 bg-gray-900/70 text-center text-xs text-gray-500/80 z-20">
+            <span id="user-id-display"></span>
+        </div>
+    </div>
+
+    <!-- JavaScript Game Logic -->
+    <script>
+        // --- GAME CONSTANTS ---
+        const FISH_DATA = [
+            // Hook window is now the primary difficulty metric (in milliseconds)
+            { type: 'Treasure', rarity: 1, hookWindow: 3000, points: 500, emoji: '💎', color: 'text-yellow-300' },
+            { type: 'Large Fish', rarity: 10, hookWindow: 400, points: 100, emoji: '🦈', color: 'text-gray-300' },
+            { type: 'Medium Fish', rarity: 30, hookWindow: 550, points: 25, emoji: '🐟', color: 'text-blue-400' },
+            { type: 'Small Fish', rarity: 55, hookWindow: 800, points: 10, emoji: '🐡', color: 'text-orange-400' },
+            { type: 'Seaweed', rarity: 4, hookWindow: 3000, points: 5, emoji: '🌿', color: 'text-green-500' }, 
+        ]; // Total Rarity: 100
+
+        const GAME_STATE = {
+            IDLE: 'IDLE',
+            CASTING: 'CASTING',
+            WAITING: 'WAITING',
+            CAUGHT: 'CAUGHT',
+            LOST: 'LOST',
+            OVER: 'OVER' // New state for game end
+        };
+
+        const CAST_DURATION_MS = 500; // Duration of the casting animation
+        const GAME_DURATION_MS = 45000; // 45 seconds game time
+
+        // --- GAME STATE VARIABLES ---
+        let currentState = GAME_STATE.IDLE;
+        let score = 0;
+        let highScore = 0;
+        let currentFish = null;
+        let waitingTimeoutId = null;
+        let gameTimerId = null; // ID for requestAnimationFrame timer
+        let timeRemaining = GAME_DURATION_MS; // Milliseconds remaining
+        
+        // --- DOM ELEMENT REFERENCES ---
+        const $score = document.getElementById('current-score');
+        const $highScore = document.getElementById('high-score');
+        const $timer = document.getElementById('game-timer'); // New timer element
+        const $message = document.getElementById('game-message');
+        const $instructions = document.getElementById('instruction-message');
+        const $rod = document.getElementById('rod');
+        const $line = document.getElementById('fishing-line');
+        const $lure = document.getElementById('lure'); 
+        const $catchVisual = document.getElementById('fish-catch-visual');
+        const $rodTipAnchor = document.getElementById('rod-tip-anchor');
+        
+        // --- VISUAL/POSITION CONSTANTS (Top-Down View) ---
+        const LURE_CAST_X = 50; // Target X coordinate for lure (center of screen)
+        const LURE_CAST_Y = 50; // Target Y coordinate for lure (center of screen)
+
+        // --- AUDIO SETUP ---
+        let biteAlertSynth; 
+        let audioContextStarted = false; 
+
+        if (typeof Tone !== 'undefined') {
+            
+            // 1. Bite Alert (Simple FM synth for a pleasant ping)
+            biteAlertSynth = new Tone.Synth({
+                oscillator: { type: "sine" },
+                envelope: { attack: 0.01, decay: 0.1, sustain: 0.1, release: 0.5 },
+                volume: -5 // Increased volume from -10 to -5
+            }).toDestination();
+            
+        } else {
+            console.warn("Tone.js not loaded. Audio effects disabled.");
+        }
+        
+        /**
+         * Guarantees the Tone.js Audio Context is running after a user interaction.
+         */
+        const startAudio = () => {
+            if (audioContextStarted || typeof Tone === 'undefined') return;
+            
+            // Start the browser's AudioContext
+            Tone.start().then(() => {
+                console.log("Tone.js Audio Context started.");
+                audioContextStarted = true;
+            }).catch(e => {
+                console.error("Failed to start Tone.js Audio Context:", e);
+            });
+        };
+
+
+        // --- FIREBASE/FIRESTORE FUNCTIONS ---
+
+        window.loadHighScores = function() {
+            if (!window.isAuthReady || !window.db) return;
+
+            // Load Global High Score (for display)
+            const q = window.query(window.collection(window.db, window.HIGHSCORE_COLLECTION_PATH), window.orderBy("score", "desc"), window.limit(1));
+            // Use onSnapshot for real-time updates
+            window.onSnapshot(q, (snapshot) => {
+                let topScore = 0;
+                snapshot.forEach((doc) => {
+                    if (doc.data().score > topScore) {
+                        topScore = doc.data().score;
+                    }
+                });
+                highScore = topScore;
+                $highScore.textContent = highScore.toString();
+            }, (error) => {
+                console.error("Error fetching high score:", error);
+            });
+        };
+
+        const saveScore = async (newScore) => {
+            if (!window.isAuthReady || !window.db || newScore < highScore) return;
+
+            const scoreRef = window.doc(window.db, window.HIGHSCORE_COLLECTION_PATH, window.userId);
+
+            try {
+                const docSnap = await window.getDoc(scoreRef);
+                const existingScore = docSnap.exists() ? docSnap.data().score : 0;
+
+                if (newScore > existingScore) {
+                    await window.setDoc(scoreRef, {
+                        userId: window.userId,
+                        score: newScore,
+                        timestamp: Date.now()
+                    });
+                    console.log("Score updated successfully.");
+                }
+            } catch (e) {
+                console.error("Error saving score:", e);
+            }
+        };
+
+        // --- UTILITY FUNCTIONS ---
+
+        // Get the coordinates of the rod tip relative to the scene container
+        const getRodTipCoordinates = () => {
+            // getBoundingClientRect() is the safest way to get the final rendered position
+            const rodTipRect = $rodTipAnchor.getBoundingClientRect();
+            const sceneRect = document.getElementById('scene').getBoundingClientRect();
+            
+            // Calculate coordinates relative to the scene
+            // We use the center of the anchor point for the line start
+            const x = rodTipRect.left + rodTipRect.width / 2 - sceneRect.left;
+            const y = rodTipRect.top + rodTipRect.height / 2 - sceneRect.top;
+            
+            return { x, y };
+        };
+
+        // Calculate line length and angle for a diagonal line
+        const calculateLineGeometry = (startX, startY, endX, endY) => {
+            const dx = endX - startX;
+            const dy = endY - startY;
+            const length = Math.sqrt(dx * dx + dy * dy);
+            // Angle in degrees
+            const angle = Math.atan2(dy, dx) * (180 / Math.PI);
+            return { length, angle };
+        };
+
+        const drawLine = (startX, startY, endX, endY, isCast) => {
+            const { length, angle } = calculateLineGeometry(startX, startY, endX, endY);
+            
+            // Set line start point (top-left corner of the line div)
+            $line.style.left = `${startX}px`;
+            $line.style.top = `${startY}px`;
+            
+            // Set length and rotation
+            $line.style.width = `${length}px`;
+            // Increased line height to 3px for better visual overlap with the bobber
+            $line.style.height = `3px`; 
+            $line.style.transform = `rotate(${angle}deg)`;
+            $line.style.opacity = isCast ? '1' : '0';
+
+            // Lure positioning: center the lure at the endpoint
+            $lure.style.left = `${endX}px`;
+            $lure.style.top = `${endY}px`;
+            $lure.style.transform = 'translate(-50%, -50%)'; 
+            $lure.style.opacity = isCast ? '1' : '0';
+        };
+
+        // --- GAME TIMER FUNCTIONS ---
+        let lastTime = 0;
+
+        const startTimer = () => {
+            // Stop any existing timer
+            if (gameTimerId) cancelAnimationFrame(gameTimerId);
+            
+            // NOTE: timeRemaining is now reset in handleInput when restarting from OVER.
+            
+            lastTime = performance.now();
+            $timer.textContent = Math.ceil(timeRemaining / 1000);
+
+            const updateTimer = (timestamp) => {
+                const elapsed = timestamp - lastTime;
+                lastTime = timestamp;
+                
+                timeRemaining -= elapsed;
+
+                if (timeRemaining <= 0) {
+                    stopTimer();
+                    endGame();
+                    return;
+                }
+
+                // Update display every full second
+                $timer.textContent = Math.ceil(timeRemaining / 1000);
+                
+                gameTimerId = requestAnimationFrame(updateTimer);
+            };
+
+            gameTimerId = requestAnimationFrame(updateTimer);
+        };
+
+        const stopTimer = () => {
+            if (gameTimerId) {
+                cancelAnimationFrame(gameTimerId);
+                gameTimerId = null;
+            }
+        };
+
+        const endGame = () => {
+            stopTimer();
+            // Stop any ongoing fishing timeouts
+            if (waitingTimeoutId) clearTimeout(waitingTimeoutId);
+            
+            // Clear line/lure
+            const { x, y } = getRodTipCoordinates();
+            drawLine(x, y, x, y, false);
+            
+            // Final save of the score (handles high score check internally)
+            saveScore(score); 
+            
+            // Transition to game over state
+            currentState = GAME_STATE.OVER;
+
+            $timer.textContent = 0;
+            // Use innerHTML to inject the yellow class for the final score
+            $message.innerHTML = `TIME UP! Final Score: <span class="text-yellow-400">${score}</span>`;
+            $instructions.textContent = `Tap or press SPACE to play again!`;
+        };
+        // --- END GAME TIMER FUNCTIONS ---
+
+        // --- GAME LOGIC FUNCTIONS ---
+
+        const updateScore = (points) => {
+            score += points;
+            $score.textContent = score.toString();
+            if (score > highScore) {
+                highScore = score;
+                $highScore.textContent = highScore.toString();
+            }
+        };
+
+        const getFishToCatch = () => {
+            const roll = Math.random() * 100;
+            let cumulativeRarity = 0;
+            for (const fish of FISH_DATA) {
+                cumulativeRarity += fish.rarity;
+                if (roll <= cumulativeRarity) {
+                    return fish;
+                }
+            }
+            return FISH_DATA[FISH_DATA.length - 1]; // Fallback (Seaweed)
+        };
+
+        const setGameState = (newState) => {
+            currentState = newState;
+            $message.classList.remove('hidden');
+            $instructions.textContent = '';
+            
+            // Rod remains at the resting position
+            $rod.style.transform = 'rotate(-5deg) translateX(-50%)'; 
+            currentFish = null; 
+
+            if (waitingTimeoutId) {
+                clearTimeout(waitingTimeoutId);
+                waitingTimeoutId = null;
+            }
+
+            // Get rod tip position for line reset
+            const { x, y } = getRodTipCoordinates();
+            
+            switch (currentState) {
+                case GAME_STATE.IDLE:
+                    $message.textContent = 'Press SPACE or TAP to Cast';
+                    
+                    // If the game is still running, show the 'to cast' message.
+                    if (gameTimerId) {
+                         $message.textContent = 'Reeled in. Cast again!';
+                    }
+                    
+                    // Reset line/lure position to rod tip and hide
+                    drawLine(x, y, x, y, false);
+                    break;
+                case GAME_STATE.CASTING:
+                    $message.textContent = 'CASTING...';
+                    $instructions.textContent = '';
+                    // The line is drawn via animation loop
+                    break;
+                case GAME_STATE.WAITING:
+                    if (timeRemaining <= 0) { endGame(); return; }
+                    $message.textContent = 'Waiting for a bite...';
+                    $instructions.textContent = 'Tap/Spacebar to hook when the line tugs!';
+                    startWaitingForBite();
+                    break;
+                case GAME_STATE.CAUGHT:
+                    // Message handled by catchFish
+                    break;
+                case GAME_STATE.LOST:
+                    // Message handled by loseFish
+                    break;
+                case GAME_STATE.OVER:
+                    // Timer is stopped, message handled by endGame
+                    break;
+            }
+        };
+
+        /**
+         * Animates the lure moving from the rod tip to the target cast location
+         * over the CAST_DURATION_MS time.
+         */
+        const animateCast = (startTime, startX, startY, endX, endY) => {
+            if (timeRemaining <= 0) { endGame(); return; }
+
+            const elapsed = performance.now() - startTime;
+            const progress = Math.min(elapsed / CAST_DURATION_MS, 1); // 0.0 to 1.0
+
+            // Simple linear interpolation for X and Y
+            const currentLureX = startX + (endX - startX) * progress;
+            const currentLureY = startY + (endY - startY) * progress;
+
+            // Draw line from rod tip (fixed start) to current lure position.
+            drawLine(startX, startY, currentLureX, currentLureY, true);
+
+            if (progress < 1) {
+                // Continue animation
+                requestAnimationFrame(() => animateCast(startTime, startX, startY, endX, endY));
+            } else {
+                // Animation complete, move to waiting state
+                setGameState(GAME_STATE.WAITING);
+            }
+        };
+
+        const castLine = () => {
+            // Check state BEFORE casting to prevent immediate recursion to endGame
+            if (currentState === GAME_STATE.OVER || timeRemaining <= 0) {
+                endGame();
+                return;
+            }
+
+            setGameState(GAME_STATE.CASTING);
+
+            // 1. Rod remains completely still at resting position (-5deg)
+            $rod.style.transform = 'rotate(-5deg) translateX(-50%)'; 
+            
+            // 2. Calculate Start (Rod Tip) and End (Lure Target) positions
+            const { x: rodTipX, y: rodTipY } = getRodTipCoordinates();
+
+            const sceneRect = document.getElementById('scene').getBoundingClientRect();
+            const lureX = sceneRect.width * (LURE_CAST_X / 100);
+            const lureY = sceneRect.height * (LURE_CAST_Y / 100);
+            
+            // 3. Start the animated line draw
+            const startTime = performance.now();
+            animateCast(startTime, rodTipX, rodTipY, lureX, lureY);
+        };
+
+        const startWaitingForBite = () => {
+            const waitTime = Math.random() * 5000 + 2000; // Wait 2s to 7s
+            if (waitingTimeoutId) clearTimeout(waitingTimeoutId);
+            waitingTimeoutId = setTimeout(showBite, waitTime);
+        };
+
+        const showBite = () => {
+            if (currentState !== GAME_STATE.WAITING || timeRemaining <= 0) {
+                endGame(); // Safety check
+                return;
+            }
+
+            currentFish = getFishToCatch(); 
+            
+            // Visual Cue: A subtle bob/tug of the line and lure
+            $lure.style.transform = 'translate(-50%, -50%) translate(0, 5px)'; 
+            $rod.style.transform = 'rotate(-10deg) translateX(-50%)'; 
+
+            if (audioContextStarted) {
+                console.log("Tone.js: Triggering bite alert."); // Log added to confirm execution
+                if (biteAlertSynth) {
+                    biteAlertSynth.triggerAttackRelease("G5", "8n");
+                }
+            }
+
+            // Return to normal after a quick flash (cues the player to react)
+            setTimeout(() => {
+                $lure.style.transform = 'translate(-50%, -50%)'; 
+                $rod.style.transform = 'rotate(-5deg) translateX(-50%)'; 
+            }, 100); 
+
+            // User must hook within the fish's hookWindow
+            waitingTimeoutId = setTimeout(() => {
+                if (currentState === GAME_STATE.WAITING) {
+                    loseFish("You failed to hook the fish in time."); 
+                }
+            }, currentFish.hookWindow); 
+        };
+
+        const attemptHook = () => {
+            if (currentState !== GAME_STATE.WAITING || timeRemaining <= 0) {
+                 endGame();
+                 return;
+            }
+
+            if (currentFish) {
+                // Hook successful!
+                if (waitingTimeoutId) clearTimeout(waitingTimeoutId);
+
+                // Ensure lure/rod is reset to non-tugging state
+                $lure.style.transform = 'translate(-50%, -50%)'; 
+                $rod.style.transform = 'rotate(-5deg) translateX(-50%)'; 
+
+                catchFish(); 
+                
+            } else {
+                // Early hook!
+                loseFish("Reeled too early!");
+            }
+        };
+
+        const catchFish = (messageOverride = null) => {
+            if (timeRemaining <= 0) { endGame(); return; }
+
+            const caughtFish = currentFish; 
+            
+            // This call clears currentFish and sets state to CAUGHT
+            setGameState(GAME_STATE.CAUGHT); 
+
+            if (!caughtFish) {
+                console.error("Catch called without a fish. State bug.");
+                setGameState(GAME_STATE.LOST);
+                return;
+            }
+
+            const pointsGained = caughtFish.points;
+            updateScore(pointsGained);
+            
+            let customMessage;
+            switch (caughtFish.type) {
+                case 'Seaweed': customMessage = 'You reeled in Seaweed! Better than nothing...'; break;
+                case 'Treasure': customMessage = "You reeled in TREASURE! It's your lucky day!"; break;
+                default: customMessage = `You caught a ${caughtFish.type.toLowerCase()}!`; break;
+            }
+
+            $message.textContent = messageOverride || customMessage;
+            $instructions.textContent = `+${pointsGained} points. Reeled in a ${caughtFish.type}. Press SPACE or TAP to Cast.`;
+
+            // Fish pop-out visual
+            $catchVisual.textContent = caughtFish.emoji;
+            $catchVisual.classList.remove('opacity-0', 'scale-50');
+            $catchVisual.classList.add('scale-150', 'opacity-100');
+            $catchVisual.classList.add(caughtFish.color || 'text-white');
+
+            // Line/Lure reset to starting point and hide
+            const { x, y } = getRodTipCoordinates();
+            drawLine(x, y, x, y, false);
+            
+            setTimeout(() => {
+                $catchVisual.classList.remove('scale-150', 'opacity-100');
+                $catchVisual.classList.add('opacity-0', 'scale-50');
+                $catchVisual.classList.remove(caughtFish.color || 'text-white');
+                // FIX: Only transition back to IDLE if the game is not already OVER
+                if (currentState !== GAME_STATE.OVER) {
+                    setGameState(GAME_STATE.IDLE);
+                }
+            }, 1000); // Reduced delay to 1s for quicker re-cast
+        };
+
+        const loseFish = (reason) => {
+            if (timeRemaining <= 0) { endGame(); return; }
+
+            setGameState(GAME_STATE.LOST);
+            
+            // Set message before timeout
+            $message.textContent = 'YOU LOST THE FISH!';
+            $instructions.textContent = 'Press SPACE or TAP to Cast';
+
+            // Line/Lure reset
+            const { x, y } = getRodTipCoordinates();
+            drawLine(x, y, x, y, false);
+            
+            // Set timeout to transition to IDLE state
+            setTimeout(() => {
+                // FIX: Only transition back to IDLE if the game is not already OVER
+                if (currentState !== GAME_STATE.OVER) {
+                    setGameState(GAME_STATE.IDLE);
+                }
+            }, 1000); // Reduced delay to 1s
+        };
+
+        // --- INPUT AND INITIALIZATION HANDLERS ---
+
+        const handleInput = () => {
+            // 1. Ensure audio context is started on first interaction
+            startAudio(); 
+
+            switch (currentState) {
+                case GAME_STATE.IDLE:
+                    // CRITICAL FIX: Only start the timer if it's NOT already running (i.e., not the first cast)
+                    if (!gameTimerId) { 
+                        startTimer(); 
+                    }
+                    castLine();
+                    break;
+                case GAME_STATE.OVER: // Allow restart from game over screen
+                    // Reset score and visual
+                    score = 0;
+                    $score.textContent = '0';
+                    $catchVisual.classList.remove('scale-150', 'opacity-100');
+                    $catchVisual.classList.add('opacity-0', 'scale-50');
+                    
+                    // FIX: Explicitly reset timeRemaining before starting the timer.
+                    timeRemaining = GAME_DURATION_MS;
+
+                    // Now change state to IDLE.
+                    currentState = GAME_STATE.IDLE;
+                    
+                    startTimer(); // Restart the timer (now timeRemaining is correct)
+                    castLine(); // Start the first cast
+                    break;
+                case GAME_STATE.WAITING:
+                    attemptHook();
+                    break;
+            }
+        };
+
+        window.setupEventListeners = function() {
+            // Spacebar Handler (Desktop)
+            document.addEventListener('keydown', (e) => {
+                if (e.code === 'Space' && !e.repeat) {
+                    e.preventDefault();
+                    handleInput();
+                }
+            });
+
+            // Tap Handler (Mobile/Touch)
+            document.getElementById('game-container').addEventListener('click', (e) => {
+                handleInput();
+            });
+
+            // Recalculate line position on window resize
+            window.addEventListener('resize', () => {
+                // If the line is cast, redraw it based on the new container size
+                if (currentState === GAME_STATE.WAITING) {
+                    const { x: rodTipX, y: rodTipY } = getRodTipCoordinates();
+                    const sceneRect = document.getElementById('scene').getBoundingClientRect();
+                    const lureX = sceneRect.width * (LURE_CAST_X / 100);
+                    const lureY = sceneRect.height * (LURE_CAST_Y / 100);
+                    drawLine(rodTipX, rodTipY, lureX, lureY, true);
+                }
+            });
+            
+            // Initial setup
+            // Display initial time remaining
+            $timer.textContent = Math.ceil(GAME_DURATION_MS / 1000); 
+            setGameState(GAME_STATE.IDLE);
+        }
+        
+        // FIX: Call setupEventListeners immediately so input is active while Firebase loads
+        window.setupEventListeners();
+    </script>
+    <br>
+    <h1><a href="scratch.html">Click on this link to learn about BYU Choir!</a></h1>
+</body>
+</html>
